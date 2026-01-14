@@ -1,0 +1,24 @@
+# Security (CRITICAL)
+.env
+infra/.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.pytest_cache/
+
+# Docker / Infrastructure
+.DS_Store
+logs/
+plugins/
+docker-context-files/
+
+# IDEs
+.vscode/
+.idea/
+
+# Local Data (If you ever mount local folders)
+data/
+minio_data/
+postgres_data/

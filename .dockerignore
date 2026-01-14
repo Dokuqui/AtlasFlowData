@@ -1,0 +1,9 @@
+.git
+.env
+infra/.env
+logs/
+minio_data/
+postgres_data/
+venv/
+__pycache__
+*.md
