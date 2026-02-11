@@ -1,0 +1,12 @@
+domain: retail
+owner: data_engineering_team
+
+sources:
+  - name: "postgres_main"
+    type: "database"
+    connection_id: "postgres_default"
+    tables:
+      - table_name: "orders"
+        destination_path: "retail/orders/"
+      - table_name: "users"
+        destination_path: "retail/users/"

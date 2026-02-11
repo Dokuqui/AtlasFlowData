@@ -50,6 +50,12 @@ graph TD
 
 ## 🚀 How to Run
 
+> ⚠️ **Note**
+> You must create a `.env` file inside the `infra/` directory  
+> and also maintain a global `.env` file in the project root.
+>
+> Both are required for Docker Compose to work correctly.
+
 1. **Clone the repo:**
 
 ```bash

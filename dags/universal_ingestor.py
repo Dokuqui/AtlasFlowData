@@ -1,0 +1,89 @@
+import os
+import yaml
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.utils.dates import days_ago
+from io import BytesIO
+import boto3
+
+CONFIG_PATH = "/opt/airflow/configs"
+
+
+def get_minio_client():
+    return boto3.client(
+        "s3",
+        endpoint_url="http://minio:9000",
+        aws_access_key_id="minio_admin",
+        aws_secret_access_key="minio_password123",
+        region_name="us-east-1",
+    )
+
+
+def ingest_table(table_name, destination_path, conn_id, **kwargs):
+    print(f"🚀 Starting ingestion for table: {table_name}")
+
+    pg_hook = PostgresHook(postgres_conn_id=conn_id)
+    df = pg_hook.get_pandas_df(sql=f"SELECT * FROM {table_name}")
+    print(f"✅ Extracted {len(df)} rows from {table_name}")
+
+    parquet_buffer = BytesIO()
+    df.to_parquet(parquet_buffer, index=False)
+    parquet_buffer.seek(0)
+
+    s3 = get_minio_client()
+    bucket_name = "bronze"
+    file_key = f"{destination_path}{table_name}.parquet"
+
+    try:
+        s3.head_bucket(Bucket=bucket_name)
+    except:
+        s3.create_bucket(Bucket=bucket_name)
+
+    s3.put_object(Bucket=bucket_name, Key=file_key, Body=parquet_buffer.getvalue())
+    print(f"🎉 Successfully uploaded to s3://{bucket_name}/{file_key}")
+
+
+def load_configs():
+    """Reads all YAML files from the config folder"""
+    configs = []
+    if os.path.exists(CONFIG_PATH):
+        for filename in os.listdir(CONFIG_PATH):
+            if filename.endswith(".yaml"):
+                file_path = os.path.join(CONFIG_PATH, filename)
+                with open(file_path, "r") as f:
+                    content = yaml.safe_load(f)
+                    if content:
+                        configs.append(content)
+                    else:
+                        print(f"⚠️ Warning: Skipped empty config file: {filename}")
+    return configs
+
+
+for config in load_configs():
+    domain = config.get("domain", "default_domain")
+
+    with DAG(
+        dag_id=f"universal_ingestor_{domain}",
+        schedule_interval="@daily",
+        start_date=days_ago(1),
+        catchup=False,
+        tags=["universal", domain],
+    ) as dag:
+        if "sources" in config:
+            for source in config["sources"]:
+                if source["type"] == "database":
+                    conn_id = source["connection_id"]
+                    for table in source["tables"]:
+                        table_name = table["table_name"]
+                        dest_path = table["destination_path"]
+
+                        PythonOperator(
+                            task_id=f"ingest_{table_name}",
+                            python_callable=ingest_table,
+                            op_kwargs={
+                                "table_name": table_name,
+                                "destination_path": dest_path,
+                                "conn_id": conn_id,
+                            },
+                        )

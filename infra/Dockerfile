@@ -14,4 +14,7 @@ USER airflow
 RUN pip install --no-cache-dir \
     "apache-airflow-providers-apache-spark" \
     "pyspark==3.5.3" \
+    "pandas" \
+    "boto3" \
+    "pyyaml" \
     --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.4/constraints-3.10.txt"
