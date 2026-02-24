@@ -11,10 +11,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
 USER airflow
 
-RUN pip install --no-cache-dir \
-    "apache-airflow-providers-apache-spark" \
-    "pyspark==3.5.3" \
-    "pandas" \
-    "boto3" \
-    "pyyaml" \
+COPY requirements.txt /requirements.txt
+
+RUN pip install --no-cache-dir -r /requirements.txt \
     --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.4/constraints-3.10.txt"
