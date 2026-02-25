@@ -21,11 +21,11 @@ def get_minio_client():
 
 
 def ingest_table(table_name, destination_path, conn_id, **kwargs):
-    print(f"🚀 Starting ingestion for table: {table_name}")
+    print(f"Starting ingestion for table: {table_name}")
 
     pg_hook = PostgresHook(postgres_conn_id=conn_id)
     df = pg_hook.get_pandas_df(sql=f"SELECT * FROM {table_name}")
-    print(f"✅ Extracted {len(df)} rows from {table_name}")
+    print(f"Extracted {len(df)} rows from {table_name}")
 
     parquet_buffer = BytesIO()
     df.to_parquet(parquet_buffer, index=False)
@@ -41,7 +41,7 @@ def ingest_table(table_name, destination_path, conn_id, **kwargs):
         s3.create_bucket(Bucket=bucket_name)
 
     s3.put_object(Bucket=bucket_name, Key=file_key, Body=parquet_buffer.getvalue())
-    print(f"🎉 Successfully uploaded to s3://{bucket_name}/{file_key}")
+    print(f"Successfully uploaded to s3://{bucket_name}/{file_key}")
 
 
 def load_configs():
@@ -56,7 +56,7 @@ def load_configs():
                     if content:
                         configs.append(content)
                     else:
-                        print(f"⚠️ Warning: Skipped empty config file: {filename}")
+                        print(f"Warning: Skipped empty config file: {filename}")
     return configs
 
 

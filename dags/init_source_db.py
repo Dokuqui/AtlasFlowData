@@ -1,40 +1,41 @@
+import random
+import pandas as pd
+from datetime import datetime
 from airflow import DAG
-from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.dates import days_ago
 
-CREATE_TABLES_SQL = """
-    CREATE TABLE IF NOT EXISTS users (
-        user_id SERIAL PRIMARY KEY,
-        email VARCHAR(100),
-        signup_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
 
-    CREATE TABLE IF NOT EXISTS orders (
-        order_id SERIAL PRIMARY KEY,
-        user_id INT,
-        product_id INT,
-        amount DECIMAL(10, 2),
-        status VARCHAR(20),
-        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+def generate_and_load_data():
+    hook = PostgresHook(postgres_conn_id="postgres_default")
+    engine = hook.get_sqlalchemy_engine()
 
-    -- Insert fake users
-    INSERT INTO users (email)
-    SELECT 
-        'user_' || generate_series || '@example.com'
-    FROM generate_series(1, 100)
-    WHERE NOT EXISTS (SELECT 1 FROM users);
+    users_data = [
+        {"user_id": i, "email": f"user_{i}@example.com", "signup_date": datetime.now()}
+        for i in range(1, 101)
+    ]
+    users_df = pd.DataFrame(users_data)
 
-    -- Insert fake orders
-    INSERT INTO orders (user_id, product_id, amount, status) 
-    SELECT 
-        floor(random() * 100 + 1)::int,
-        floor(random() * 50 + 1)::int,
-        (random() * 100)::decimal(10,2),
-        CASE WHEN random() < 0.8 THEN 'completed' ELSE 'failed' END
-    FROM generate_series(1, 20)
-    WHERE NOT EXISTS (SELECT 1 FROM orders);
-"""
+    orders_data = []
+    for i in range(1, 21):
+        orders_data.append(
+            {
+                "order_id": i,
+                "user_id": random.randint(1, 100),
+                "product_id": random.randint(1, 50),
+                "amount": round(random.uniform(10.0, 100.0), 2),
+                "status": "completed" if random.random() < 0.8 else "failed",
+                "order_date": datetime.now(),
+            }
+        )
+    orders_df = pd.DataFrame(orders_data)
+
+    users_df.to_sql("users", con=engine, if_exists="replace", index=False)
+    orders_df.to_sql("orders", con=engine, if_exists="replace", index=False)
+
+    print(f"Successfully inserted {len(users_df)} users and {len(orders_df)} orders.")
+
 
 with DAG(
     dag_id="init_source_db",
@@ -43,8 +44,7 @@ with DAG(
     catchup=False,
     tags=["setup"],
 ) as dag:
-    create_tables = SQLExecuteQueryOperator(
+    create_tables = PythonOperator(
         task_id="create_fake_data",
-        conn_id="postgres_default",
-        sql=CREATE_TABLES_SQL,
+        python_callable=generate_and_load_data,
     )
