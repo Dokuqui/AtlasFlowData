@@ -6,17 +6,26 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.dates import days_ago
 from io import BytesIO
 import boto3
+from botocore.client import Config
 
 CONFIG_PATH = "/opt/airflow/configs"
 
 
 def get_minio_client():
+    minio_access_key = os.environ.get("MINIO_ROOT_USER")
+    minio_secret_key = os.environ.get("MINIO_ROOT_PASSWORD")
+    minio_endpoint = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
+
+    if not minio_access_key or not minio_secret_key:
+        raise ValueError("MinIO credentials are missing from environment variables.")
+
     return boto3.client(
         "s3",
-        endpoint_url="http://minio:9000",
-        aws_access_key_id="minio_admin",
-        aws_secret_access_key="minio_password123",
+        endpoint_url=minio_endpoint,
+        aws_access_key_id=minio_access_key,
+        aws_secret_access_key=minio_secret_key,
         region_name="us-east-1",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
 
 
@@ -26,6 +35,11 @@ def ingest_table(table_name, destination_path, conn_id, **kwargs):
     pg_hook = PostgresHook(postgres_conn_id=conn_id)
     df = pg_hook.get_pandas_df(sql=f"SELECT * FROM {table_name}")
     print(f"Extracted {len(df)} rows from {table_name}")
+
+    for col_name in df.select_dtypes(
+        include=["datetime64[ns]", "datetime64[ns, UTC]"]
+    ).columns:
+        df[col_name] = df[col_name].astype("datetime64[us]")
 
     parquet_buffer = BytesIO()
     df.to_parquet(parquet_buffer, index=False)
@@ -37,8 +51,14 @@ def ingest_table(table_name, destination_path, conn_id, **kwargs):
 
     try:
         s3.head_bucket(Bucket=bucket_name)
-    except:
-        s3.create_bucket(Bucket=bucket_name)
+    except Exception as e:
+        try:
+            s3.create_bucket(Bucket=bucket_name)
+        except Exception as create_error:
+            if "BucketAlreadyOwnedByYou" not in str(
+                create_error
+            ) and "BucketAlreadyExists" not in str(create_error):
+                raise create_error
 
     s3.put_object(Bucket=bucket_name, Key=file_key, Body=parquet_buffer.getvalue())
     print(f"Successfully uploaded to s3://{bucket_name}/{file_key}")

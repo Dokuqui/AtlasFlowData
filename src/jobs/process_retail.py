@@ -1,16 +1,44 @@
 import os
 import sys
+import boto3
+from botocore.client import Config
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date, sum as _sum, count, current_timestamp
+
+
+def setup_buckets(endpoint, access_key, secret_key):
+    """Ensures that the silver and gold buckets exist in MinIO."""
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="us-east-1",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+
+    for bucket in ["silver", "gold"]:
+        try:
+            s3.head_bucket(Bucket=bucket)
+        except Exception:
+            try:
+                s3.create_bucket(Bucket=bucket)
+                print(f"Created missing bucket: {bucket}")
+            except Exception as e:
+                if "BucketAlready" not in str(e):
+                    print(f"Warning creating bucket {bucket}: {e}")
 
 
 def main():
     MINIO_ACCESS_KEY = os.environ.get("MINIO_ROOT_USER")
     MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
-    MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT")
+    MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
 
     if not all([MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_ENDPOINT]):
         raise ValueError("Missing one or more required MinIO environment variables.")
+
+    print("Checking MinIO destination buckets...")
+    setup_buckets(MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY)
 
     spark = (
         SparkSession.builder.appName("RetailProcessing")

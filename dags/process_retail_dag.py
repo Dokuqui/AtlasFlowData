@@ -24,7 +24,7 @@ with DAG(
         env={
             "MINIO_ROOT_USER": os.environ.get("MINIO_ROOT_USER"),
             "MINIO_ROOT_PASSWORD": os.environ.get("MINIO_ROOT_PASSWORD"),
-            "MINIO_ENDPOINT": "http://minio:9000",
+            "MINIO_ENDPOINT": os.environ.get("MINIO_ENDPOINT", "http://minio:9000"),
         },
         append_env=True,
     )
