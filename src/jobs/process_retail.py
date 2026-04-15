@@ -1,9 +1,15 @@
 import os
-import sys
 import boto3
 from botocore.client import Config
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, to_date, sum as _sum, count, current_timestamp
+from pyspark.sql.functions import (
+    col,
+    to_date,
+    sum as _sum,
+    count,
+    current_timestamp,
+    when,
+)
 
 
 def setup_buckets(endpoint, access_key, secret_key):
@@ -34,11 +40,23 @@ def main():
     MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
     MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
 
+    POSTGRES_USER = os.environ.get("POSTGRES_USER")
+    POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD")
+    POSTGRES_DB = os.environ.get("POSTGRES_DB")
+    POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres")
+
     if not all([MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_ENDPOINT]):
         raise ValueError("Missing one or more required MinIO environment variables.")
 
     print("Checking MinIO destination buckets...")
     setup_buckets(MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY)
+
+    jdbc_url = f"jdbc:postgresql://{POSTGRES_HOST}:5432/{POSTGRES_DB}"
+    jdbc_properties = {
+        "user": POSTGRES_USER,
+        "password": POSTGRES_PASSWORD,
+        "driver": "org.postgresql.Driver",
+    }
 
     spark = (
         SparkSession.builder.appName("RetailProcessing")
@@ -56,7 +74,7 @@ def main():
 
     print("Starting Retail Processing Job...")
 
-    print("Processing Silver Layer...")
+    print("Processing Silver Layer (Orders)...")
     orders_df = spark.read.parquet("s3a://bronze/retail/orders/*.parquet")
 
     silver_orders = (
@@ -66,11 +84,9 @@ def main():
         .filter(col("amount") > 0)
         .withColumn("_processed_at", current_timestamp())
     )
-
     silver_orders.write.mode("overwrite").parquet("s3a://silver/retail/orders/")
-    print(f"Silver Orders processed: {silver_orders.count()} rows")
 
-    print("Processing Gold Layer...")
+    print("Processing Gold Layer (Daily Sales)...")
     daily_sales = (
         silver_orders.groupBy("order_date", "status")
         .agg(
@@ -79,10 +95,55 @@ def main():
         )
         .orderBy("order_date")
     )
-
     daily_sales.write.mode("overwrite").parquet("s3a://gold/retail/daily_sales/")
-    print("Gold Daily Sales processed.")
-    daily_sales.show()
+
+    print("Pushing Daily Sales to Postgres Data Warehouse...")
+    daily_sales.write.jdbc(
+        url=jdbc_url,
+        table="gold_daily_sales",
+        mode="overwrite",
+        properties=jdbc_properties,
+    )
+    daily_sales.show(5)
+
+    print("Processing Silver Layer (Events)...")
+    try:
+        events_df = spark.read.parquet("s3a://bronze/retail/events_stream/")
+
+        silver_events = (
+            events_df.dropDuplicates(["event_id"])
+            .withColumn("event_date", to_date(col("timestamp")))
+            .withColumn("_processed_at", current_timestamp())
+        )
+        silver_events.write.mode("overwrite").parquet("s3a://silver/retail/events/")
+
+        print("Processing Gold Layer (Product Engagement)...")
+        product_engagement = (
+            silver_events.groupBy("product_id")
+            .agg(
+                count(when(col("action") == "view_item", True)).alias("views"),
+                count(when(col("action") == "add_to_cart", True)).alias(
+                    "added_to_cart"
+                ),
+                count(when(col("action") == "checkout", True)).alias("checkouts"),
+            )
+            .orderBy(col("views").desc())
+        )
+        product_engagement.write.mode("overwrite").parquet(
+            "s3a://gold/retail/product_engagement/"
+        )
+
+        print("Pushing Product Engagement to Postgres Data Warehouse...")
+        product_engagement.write.jdbc(
+            url=jdbc_url,
+            table="gold_product_engagement",
+            mode="overwrite",
+            properties=jdbc_properties,
+        )
+        product_engagement.show(5)
+
+    except Exception as e:
+        print(f"Skipped events processing (stream might be empty): {e}")
 
     spark.stop()
 

@@ -137,6 +137,15 @@ services:
       postgres:
         condition: service_healthy
 
+  metabase:
+    image: metabase/metabase:v0.47.6
+    container_name: afd_metabase
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:

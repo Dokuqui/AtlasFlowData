@@ -7,7 +7,7 @@ SPARK_COMMAND = """
 /home/airflow/.local/bin/spark-submit \
     --master spark://spark-master:7077 \
     --name "Retail_Silver_Gold_Processing" \
-    --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
+    --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.postgresql:postgresql:42.6.0 \
     /opt/airflow/src/jobs/process_retail.py
 """
 
@@ -25,6 +25,10 @@ with DAG(
             "MINIO_ROOT_USER": os.environ.get("MINIO_ROOT_USER"),
             "MINIO_ROOT_PASSWORD": os.environ.get("MINIO_ROOT_PASSWORD"),
             "MINIO_ENDPOINT": os.environ.get("MINIO_ENDPOINT", "http://minio:9000"),
+            "POSTGRES_USER": os.environ.get("POSTGRES_USER", "admin"),
+            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD", "admin"),
+            "POSTGRES_DB": os.environ.get("POSTGRES_DB", "atlas_db"),
+            "POSTGRES_HOST": "postgres",
         },
         append_env=True,
     )
